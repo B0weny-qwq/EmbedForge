@@ -1,0 +1,3 @@
+name: cmsis-dap
+backend: openocd
+interface: cmsis-dap

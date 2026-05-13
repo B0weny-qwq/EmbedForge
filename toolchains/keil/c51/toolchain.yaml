@@ -1,0 +1,7 @@
+name: keil-c51
+keil: /mnt/win/Keil_v5
+tools:
+  c: C51/BIN/C51.EXE
+  asm: C51/BIN/A51.EXE
+  link: C51/BIN/BL51.EXE
+  hex: C51/BIN/OH51.EXE

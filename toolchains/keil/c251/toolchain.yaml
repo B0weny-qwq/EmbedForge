@@ -1,0 +1,7 @@
+name: keil-c251
+keil: /mnt/win/Keil_v5
+tools:
+  c: C251/BIN/C251.EXE
+  asm: C251/BIN/A251.EXE
+  link: C251/BIN/l251.exe
+  hex: C251/BIN/OH251.EXE

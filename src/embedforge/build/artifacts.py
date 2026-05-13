@@ -1,0 +1,1 @@
+"""Build artifact management placeholder."""

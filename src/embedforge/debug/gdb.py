@@ -1,0 +1,1 @@
+"""GDB integration placeholder."""

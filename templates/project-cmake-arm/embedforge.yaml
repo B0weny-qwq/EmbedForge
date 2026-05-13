@@ -1,0 +1,3 @@
+project:
+  name: project-cmake-arm
+  target: cmake-arm

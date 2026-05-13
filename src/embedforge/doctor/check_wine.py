@@ -1,0 +1,1 @@
+"""Wine check placeholder."""

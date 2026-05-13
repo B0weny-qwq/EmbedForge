@@ -1,0 +1,1 @@
+"""EmbedForge error types placeholder."""

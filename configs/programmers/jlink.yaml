@@ -1,0 +1,3 @@
+name: jlink
+backend: openocd
+interface: jlink

@@ -1,0 +1,3 @@
+name: stc32g144k
+chip: c251
+programmer: stc

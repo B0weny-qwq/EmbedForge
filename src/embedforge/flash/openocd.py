@@ -1,0 +1,1 @@
+"""OpenOCD flash adapter placeholder."""

@@ -1,0 +1,5 @@
+wine:
+  command: wine
+  winepath: winepath
+keil:
+  root: /mnt/win/Keil_v5

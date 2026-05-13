@@ -1,0 +1,4 @@
+sources:
+  - src/main.c
+includes:
+  - inc

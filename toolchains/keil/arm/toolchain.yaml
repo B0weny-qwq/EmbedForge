@@ -1,0 +1,6 @@
+name: keil-arm
+keil: /mnt/win/Keil_v5
+tools:
+  armcc: ARM/ARMCC/bin/armcc.exe
+  armclang: ARM/ARMCLANG/bin/armclang.exe
+  fromelf: ARM/ARMCLANG/bin/fromelf.exe

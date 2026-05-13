@@ -1,0 +1,13 @@
+[project]
+name = "embedforge"
+version = "0.1.0"
+description = "Embedded automation toolkit for build, flash, reset, monitor, and doctor workflows."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ef = "embedforge.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

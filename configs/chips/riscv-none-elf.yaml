@@ -1,0 +1,2 @@
+name: riscv-none-elf
+toolchain: gcc-riscv-none-elf

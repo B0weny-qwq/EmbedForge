@@ -1,0 +1,1 @@
+"""STC flash adapter placeholder."""

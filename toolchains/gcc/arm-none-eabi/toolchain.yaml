@@ -1,0 +1,2 @@
+name: gcc-arm-none-eabi
+prefix: arm-none-eabi-

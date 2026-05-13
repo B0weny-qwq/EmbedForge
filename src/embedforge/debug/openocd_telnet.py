@@ -1,0 +1,1 @@
+"""OpenOCD telnet control placeholder."""

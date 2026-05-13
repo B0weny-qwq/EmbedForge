@@ -1,0 +1,18 @@
+defaults:
+  target: c251
+  board: stc32g144k
+  programmer: daplink
+
+paths:
+  keil: /mnt/win/Keil_v5
+  output: output
+  build: build
+
+tools:
+  wine: wine
+  winepath: winepath
+  openocd: openocd
+
+serial:
+  port: /dev/ttyUSB0
+  baudrate: 115200

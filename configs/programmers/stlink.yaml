@@ -1,0 +1,3 @@
+name: stlink
+backend: openocd
+interface: stlink

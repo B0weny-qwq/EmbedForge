@@ -1,0 +1,3 @@
+name: daplink
+backend: openocd
+interface: cmsis-dap
