@@ -1,0 +1,53 @@
+{
+  "default_speed": 1000,
+  "default_scripts_dir_candidates": [
+    "/opt/openocd-git/share/openocd/scripts",
+    "/usr/local/share/openocd/scripts",
+    "/usr/share/openocd/scripts"
+  ],
+  "adapters": {
+    "cmsis-dap": {
+      "interface": "interface/cmsis-dap.cfg",
+      "default_transport": "swd"
+    },
+    "daplink": {
+      "interface": "interface/cmsis-dap.cfg",
+      "default_transport": "swd"
+    },
+    "stlink": {
+      "interface": "interface/stlink.cfg",
+      "default_transport": "swd"
+    },
+    "jlink": {
+      "interface": "interface/jlink.cfg",
+      "default_transport": "swd"
+    },
+    "ftdi": {
+      "interface": null,
+      "default_transport": "jtag",
+      "requires_interface_cfg": true
+    }
+  },
+  "targets": {
+    "stm32f103": "target/stm32f1x.cfg",
+    "stm32f1": "target/stm32f1x.cfg",
+    "stm32f1x": "target/stm32f1x.cfg",
+    "stm32f407": "target/stm32f4x.cfg",
+    "stm32f4": "target/stm32f4x.cfg",
+    "stm32f4x": "target/stm32f4x.cfg",
+    "stm32g431": "target/stm32g4x.cfg",
+    "stm32g4": "target/stm32g4x.cfg",
+    "stm32g4x": "target/stm32g4x.cfg",
+    "stm32h743": "target/stm32h7x.cfg",
+    "stm32h7": "target/stm32h7x.cfg",
+    "stm32h7x": "target/stm32h7x.cfg",
+    "mspm0": [
+      "target/ti_mspm0.cfg",
+      "target/mspm0.cfg"
+    ],
+    "mspm0g3507": [
+      "target/ti_mspm0.cfg",
+      "target/mspm0.cfg"
+    ]
+  }
+}

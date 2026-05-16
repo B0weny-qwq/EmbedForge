@@ -1,1 +1,0 @@
-"""OpenOCD check placeholder."""
