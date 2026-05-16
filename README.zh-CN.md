@@ -2,6 +2,8 @@
 
 [English](README.md)
 
+部署文档：[中文](docs/deployment.zh-CN.md) / [English](docs/deployment.md)
+
 EmbedForge 是一个嵌入式开发自动化工具链，目标是在 Linux 环境下提供统一的 CLI 入口，串起编译、烧录、复位、串口日志和后续回归测试流程。
 
 当前主要面向 Ubuntu 24.x，重点支持：
@@ -168,6 +170,7 @@ MSPM0 不假定一定支持。如果当前 OpenOCD 没有 `target/ti_mspm0.cfg` 
 
 ## 更多文档
 
+- [部署文档](docs/deployment.zh-CN.md)
 - [OpenOCD 烧录说明](docs/openocd_flash.md)
 - [OpenOCD Git 构建说明](docs/openocd.md)
 - [Wine Keil 说明](docs/wine-keil.md)

@@ -2,6 +2,8 @@
 
 [中文说明](README.zh-CN.md)
 
+Deployment: [English](docs/deployment.md) / [中文](docs/deployment.zh-CN.md)
+
 EmbedForge is an embedded development automation toolkit.
 
 The project is designed to provide one command entry point for common embedded workflows:
