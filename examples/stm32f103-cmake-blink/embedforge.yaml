@@ -1,0 +1,41 @@
+project:
+  name: stm32f103-cmake-blink
+  type: stm32-hal
+
+chip:
+  vendor: st
+  family: stm32f1
+  part: STM32F103C8T6
+  define: STM32F103xB
+
+sdk:
+  type: stm32cube
+  family: f1
+  env: STM32CUBE_F1_PATH
+  default_path: ~/SDK/STM32/STM32CubeF1
+
+build:
+  system: cmake
+  generator: ninja
+  toolchain: arm-none-eabi-gcc
+  build_dir: build
+  artifact: build/app.elf
+  hex: build/app.hex
+  bin: build/app.bin
+
+flash:
+  backend: openocd
+  adapter: cmsis-dap
+  target: stm32f103
+  target_cfg: target/stm32f1x.cfg
+  interface_cfg:
+    cmsis-dap: interface/cmsis-dap.cfg
+    daplink: interface/cmsis-dap.cfg
+    stlink: interface/stlink.cfg
+  artifact: build/app.elf
+
+serial:
+  port: /dev/ttyACM0
+  baud: 115200
+  expect:
+    - UART_ALIVE

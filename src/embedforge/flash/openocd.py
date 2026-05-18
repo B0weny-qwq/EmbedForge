@@ -15,10 +15,20 @@ from typing import Any
 
 
 DEFAULT_SCRIPTS_DIR_CANDIDATES = [
+    "~/.local/openocd-git/share/openocd/scripts",
     "/opt/openocd-git/share/openocd/scripts",
     "/usr/local/share/openocd/scripts",
     "/usr/share/openocd/scripts",
 ]
+DEFAULT_OPENOCD = "~/.local/openocd-git/bin/openocd"
+FALLBACK_OPENOCD = "/opt/openocd-git/bin/openocd"
+OPENOCD_PERMISSION_ERROR_KEYWORDS = (
+    "unable to open CMSIS-DAP device",
+    "access denied",
+    "permission denied",
+    "hidapi open failed",
+    "LIBUSB_ERROR_ACCESS",
+)
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "default_speed": 1000,
@@ -72,12 +82,13 @@ class FlashPlan:
 
 
 def add_flash_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--example", default=None, help="example project name under examples/")
     parser.add_argument("--adapter", default=None, help="adapter name, such as cmsis-dap, daplink, stlink")
     parser.add_argument("--probe", default=None, help="alias for --adapter")
     parser.add_argument("--target", default=None, help="target name, such as stm32f103")
-    parser.add_argument("--file", required=True, help="firmware file: .hex, .elf, or .bin")
+    parser.add_argument("--file", default=None, help="firmware file: .hex, .elf, or .bin")
     parser.add_argument("--address", default=None, help="load address required for .bin, for example 0x08000000")
-    parser.add_argument("--openocd", default="openocd", help="OpenOCD executable path")
+    parser.add_argument("--openocd", default=None, help="OpenOCD executable path")
     parser.add_argument("--scripts-dir", default=None, help="OpenOCD scripts directory")
     parser.add_argument("--interface-cfg", default=None, help="OpenOCD interface cfg")
     parser.add_argument("--target-cfg", default=None, help="OpenOCD target cfg")
@@ -243,9 +254,11 @@ def resolve_target_cfg(args: argparse.Namespace, config: dict[str, Any], scripts
     return str(target_value)
 
 
-def validate_firmware(path_text: str) -> Path:
+def validate_firmware(path_text: str | None, require_exists: bool = True) -> Path:
+    if not path_text:
+        raise OpenOCDError("Missing firmware file. Pass --file build/app.elf or use --example.")
     path = Path(path_text).expanduser()
-    if not path.is_file():
+    if require_exists and not path.is_file():
         raise OpenOCDError(f"Firmware file not found: {path}")
     return path
 
@@ -255,7 +268,9 @@ def validate_bin_address(firmware: Path, address: str | None) -> str | None:
         return None
     if not address:
         raise OpenOCDError(
-            ".bin does not contain a flash address. Pass --address, for example STM32 often uses 0x08000000."
+            "Raw .bin does not contain load address.\n"
+            "Use:\n"
+            "  --address 0x08000000"
         )
     if not address.lower().startswith("0x"):
         raise OpenOCDError("Invalid --address. Use a hexadecimal address with 0x prefix, for example 0x08000000.")
@@ -291,9 +306,9 @@ def build_program_command(args: argparse.Namespace, firmware: Path, address: str
 
 def build_flash_plan(args: argparse.Namespace) -> FlashPlan:
     config = load_config(args.config)
-    scripts_dir = resolve_scripts_dir(args, config)
-    firmware = validate_firmware(args.file)
+    firmware = validate_firmware(args.file, require_exists=not args.dry_run)
     address = validate_bin_address(firmware, args.address)
+    scripts_dir = resolve_scripts_dir(args, config)
     interface_cfg, transport = resolve_adapter(args, config)
     target_cfg = resolve_target_cfg(args, config, scripts_dir)
     resolved_interface = resolve_cfg(scripts_dir, interface_cfg, "interface")
@@ -302,7 +317,7 @@ def build_flash_plan(args: argparse.Namespace) -> FlashPlan:
     timeout = None if args.timeout == 0 else args.timeout
 
     command = [
-        args.openocd,
+        resolve_openocd_executable(args.openocd),
         "-s",
         str(scripts_dir),
         "-f",
@@ -318,6 +333,43 @@ def build_flash_plan(args: argparse.Namespace) -> FlashPlan:
         command.extend(["-c", extra_cmd])
     command.extend(["-c", build_program_command(args, firmware, address)])
 
+    return FlashPlan(
+        command=command,
+        scripts_dir=scripts_dir,
+        interface_cfg=resolved_interface,
+        target_cfg=resolved_target,
+        firmware=firmware,
+        transport=transport,
+        speed=speed,
+        timeout=timeout,
+    )
+
+
+def build_reset_plan(args: argparse.Namespace) -> FlashPlan:
+    config = load_config(args.config)
+    scripts_dir = resolve_scripts_dir(args, config)
+    firmware = validate_firmware(args.file, require_exists=False)
+    interface_cfg, transport = resolve_adapter(args, config)
+    target_cfg = resolve_target_cfg(args, config, scripts_dir)
+    resolved_interface = resolve_cfg(scripts_dir, interface_cfg, "interface")
+    resolved_target = resolve_cfg(scripts_dir, target_cfg, "target")
+    speed = args.speed if args.speed is not None else int(config["default_speed"])
+    timeout = None if args.timeout == 0 else args.timeout
+    command = [
+        resolve_openocd_executable(args.openocd),
+        "-s",
+        str(scripts_dir),
+        "-f",
+        resolved_interface,
+        "-c",
+        f"transport select {transport}",
+        "-c",
+        f"adapter speed {speed}",
+        "-f",
+        resolved_target,
+        "-c",
+        "init; reset run; shutdown",
+    ]
     return FlashPlan(
         command=command,
         scripts_dir=scripts_dir,
@@ -354,12 +406,37 @@ def check_openocd_available(openocd: str) -> None:
         return
     raise OpenOCDError(
         "OpenOCD executable not found.\n"
-        "Install OpenOCD, run scripts/setup_openocd_git.sh, or pass "
-        "--openocd /opt/openocd-git/bin/openocd."
+        "Install OpenOCD under ~/.local/openocd-git, run scripts/setup_openocd_git.sh, "
+        "or pass --openocd explicitly."
     )
 
 
+def resolve_openocd_executable(openocd: str | None) -> str:
+    if openocd:
+        return openocd
+    for candidate in [
+        Path.home() / ".local/openocd-git/bin/openocd",
+        Path(FALLBACK_OPENOCD),
+    ]:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "openocd"
+
+
+def is_openocd_permission_error(output: str) -> bool:
+    output_lower = output.lower()
+    return any(keyword.lower() in output_lower for keyword in OPENOCD_PERMISSION_ERROR_KEYWORDS)
+
+
 def explain_openocd_failure(output: str) -> str:
+    if is_openocd_permission_error(output):
+        return (
+            "\nDAPLink/CMSIS-DAP appears to be plugged in, but the current user does not have USB/HID access.\n"
+            "- Avoid using sudo openocd as a long-term workaround.\n"
+            "- Install OpenOCD udev rules and add your user to plugdev, then log out/in and replug the probe.\n"
+            "- Temporary chmod on /dev/bus/usb/... and /dev/hidrawX is only for emergency recovery.\n"
+            "- DAPLink can re-enumerate after reset, so /dev/bus/usb bus/device numbers can change."
+        )
     if "unable to find a matching CMSIS-DAP device" in output:
         return (
             "\nDAPLink/CMSIS-DAP device was not found.\n"
@@ -415,6 +492,15 @@ def run(args: argparse.Namespace) -> int:
         plan = build_flash_plan(args)
         if args.verbose:
             print_verbose(plan)
+        return run_openocd(plan, args.dry_run)
+    except OpenOCDError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return exc.exit_code
+
+
+def run_reset(args: argparse.Namespace) -> int:
+    try:
+        plan = build_reset_plan(args)
         return run_openocd(plan, args.dry_run)
     except OpenOCDError as exc:
         print(f"error: {exc}", file=sys.stderr)

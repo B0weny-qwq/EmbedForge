@@ -12,5 +12,6 @@ logs/*
 !logs/.gitkeep
 build/*
 !build/.gitkeep
+**/build/
 output/*
 !output/.gitkeep

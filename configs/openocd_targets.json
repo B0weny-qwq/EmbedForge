@@ -1,6 +1,7 @@
 {
   "default_speed": 1000,
   "default_scripts_dir_candidates": [
+    "~/.local/openocd-git/share/openocd/scripts",
     "/opt/openocd-git/share/openocd/scripts",
     "/usr/local/share/openocd/scripts",
     "/usr/share/openocd/scripts"

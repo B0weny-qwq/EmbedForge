@@ -18,7 +18,7 @@ Python 侧可移植性较好：
 
 - Keil 是 Windows 工具链，必须由用户单独安装或挂载。
 - Wine 行为取决于宿主机包版本和 Keil 安装状态。
-- OpenOCD Git 构建需要原生编译依赖，并需要 sudo 安装到 `/opt/openocd-git`。
+- OpenOCD Git 构建需要原生编译依赖；默认安装到 `~/.local/openocd-git` 不需要 sudo，只有选择 `/opt/openocd-git` 时才需要 sudo。
 - USB 调试器需要 udev 规则和用户组权限。
 - 串口设备依赖实际硬件和 `/dev` 下的设备名。
 
@@ -96,21 +96,30 @@ EmbedForge 推荐使用 OpenOCD 上游 Git 构建版本，而不是发行版 apt
 ./scripts/setup_openocd_git.sh
 ```
 
+默认安装到用户目录。如果明确要安装到 `/opt/openocd-git`，使用：
+
+```bash
+./scripts/setup_openocd_git.sh --system
+```
+
 预期安装布局：
 
 ```text
-/opt/openocd-git/bin/openocd
-/opt/openocd-git/share/openocd/scripts
-/opt/openocd-git/EMBEDFORGE_BUILD_INFO
-~/.local/bin/openocd-git
+~/.local/openocd-git/bin/openocd
+~/.local/openocd-git/share/openocd/scripts
+~/.local/openocd-git/EMBEDFORGE_BUILD_INFO
 ```
+
+EmbedForge 的 `build` / `flash` / `run` 主流程应在普通用户权限下运行。CLI 不会自动调用 `sudo`，也不会自动 `chmod /dev/bus/usb`、安装 udev rules、修改用户组或写入 `/opt`。
+
+如果用户选择安装到 `/opt/openocd-git`，那是安装阶段的系统配置行为，需要由用户手动授权；运行 `./ef flash` 时不应依赖 sudo。
 
 验证：
 
 ```bash
-/opt/openocd-git/bin/openocd --version
-~/.local/bin/openocd-git --version
+~/.local/openocd-git/bin/openocd --version
 ./ef doctor
+./ef doctor --stm32
 ```
 
 如果 OpenOCD 安装在自定义位置：
@@ -130,15 +139,39 @@ OpenOCD scripts 目录查找顺序：
 
 1. `--scripts-dir`
 2. `OPENOCD_SCRIPTS`
-3. `/opt/openocd-git/share/openocd/scripts`
-4. `/usr/local/share/openocd/scripts`
-5. `/usr/share/openocd/scripts`
+3. `~/.local/openocd-git/share/openocd/scripts`
+4. `/opt/openocd-git/share/openocd/scripts`
+5. `/usr/local/share/openocd/scripts`
+6. `/usr/share/openocd/scripts`
+
+OpenOCD 可执行文件默认查找顺序：
+
+1. `--openocd`
+2. `~/.local/openocd-git/bin/openocd`
+3. `/opt/openocd-git/bin/openocd`
+4. `PATH` 中的 `openocd`
 
 ## USB 与调试器权限
 
 OpenOCD 需要有权限访问调试器。
 
-`scripts/setup_openocd_git.sh` 会在 OpenOCD 源码存在 `contrib/60-openocd.rules` 时安装 udev rules，reload rules，并把当前用户加入 `plugdev`。
+`scripts/setup_openocd_git.sh` 默认不会自动安装 udev rules，也不会自动修改用户组。它会在 OpenOCD 源码存在 `contrib/60-openocd.rules` 时打印需要手动执行的命令。
+
+需要 sudo 的阶段：
+
+- `sudo apt install` 安装系统依赖。
+- `sudo cp ... /etc/udev/rules.d/` 安装 udev rules。
+- `sudo usermod -aG plugdev "$USER"` 配置调试器访问用户组。
+- `sudo chmod a+rw /dev/bus/usb/... /dev/hidrawX` 临时救急。
+- `sudo make install` 安装到 `/opt/openocd-git`，如果用户选择 `/opt` 安装。
+
+不需要 sudo 的阶段：
+
+- `./ef build`
+- `./ef flash --dry-run`
+- `./ef flash`
+- `./ef run`
+- `make install` 到 `~/.local/openocd-git`
 
 安装 rules 后可以手动执行：
 
@@ -154,9 +187,18 @@ sudo udevadm trigger
 ```bash
 lsusb
 ./ef doctor
+./ef doctor --stm32
 ```
 
-不建议长期用 `sudo openocd` 解决权限问题。正确做法是修好 udev rules 和用户组权限。
+如果 DAPLink / CMSIS-DAP 重新枚举，`/dev/bus/usb/001/010` 这类设备号会变化，之前临时放开的权限也会失效。救急时可以手动执行：
+
+```bash
+sudo chmod a+rw /dev/bus/usb/001/010 /dev/hidraw9
+```
+
+其中 `001/010` 和 `hidraw9` 必须替换为当前机器实际设备。这个命令只适合临时救急，不应写入 EmbedForge 的自动流程。
+
+不建议长期用 `sudo openocd` 解决权限问题。正确做法是修好 udev rules 和用户组权限。EmbedForge 只做诊断和提示，不自动 sudo 修复系统权限。
 
 ## 烧录验证
 
@@ -270,6 +312,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 `unable to find a matching CMSIS-DAP device`
 
 检查接线、`lsusb`、udev rules、用户组权限，并拔插调试器。
+
+`unable to open CMSIS-DAP device 0xd28:0x204`
+
+DAPLink 已插入，但当前用户通常没有 USB/HID 权限。检查 `lsusb` 是否能看到 `0d28:0204`，检查 `/dev/bus/usb/...` 和 `/dev/hidrawX` 权限。推荐安装 OpenOCD udev rules 并加入 `plugdev`，然后注销重新登录并拔插调试器。临时 `sudo chmod a+rw /dev/bus/usb/... /dev/hidrawX` 只适合救急，DAPLink 重新枚举后设备号会变化。
 
 `.bin does not contain a flash address`
 

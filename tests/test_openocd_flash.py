@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import contextlib
+import io
 import os
 import subprocess
 import tempfile
@@ -91,10 +94,13 @@ class OpenOCDFlashTests(unittest.TestCase):
 
     def test_dry_run_does_not_call_subprocess(self) -> None:
         plan = openocd.build_flash_plan(self.args())
-        with mock.patch("subprocess.run") as run:
+        with mock.patch("subprocess.run") as run, mock.patch(
+            "embedforge.flash.openocd.check_openocd_available"
+        ) as check:
             result = openocd.run_openocd(plan, dry_run=True)
         self.assertEqual(result, 0)
         run.assert_not_called()
+        check.assert_not_called()
 
     def test_custom_cfg_overrides_mapping(self) -> None:
         custom_interface = self.scripts / "interface/custom.cfg"
@@ -125,6 +131,32 @@ class OpenOCDFlashTests(unittest.TestCase):
         ):
             self.assertEqual(openocd.run_openocd(plan, dry_run=False), 124)
 
+    def test_permission_error_gets_human_hint(self) -> None:
+        plan = openocd.build_flash_plan(self.args())
+        completed = subprocess.CompletedProcess(
+            plan.command,
+            1,
+            stdout="",
+            stderr="Error: unable to open CMSIS-DAP device 0xd28:0x204\nhidapi open failed\n",
+        )
+        stderr = io.StringIO()
+        with mock.patch("embedforge.flash.openocd.check_openocd_available"), mock.patch(
+            "subprocess.run", return_value=completed
+        ), contextlib.redirect_stderr(stderr):
+            self.assertEqual(openocd.run_openocd(plan, dry_run=False), 1)
+        hint = stderr.getvalue()
+        self.assertIn("current user does not have USB/HID access", hint)
+        self.assertIn("Avoid using sudo openocd", hint)
+        self.assertIn("Temporary chmod", hint)
+
+    def test_default_openocd_prefers_user_local_install(self) -> None:
+        local_openocd = self.root / ".local/openocd-git/bin/openocd"
+        local_openocd.parent.mkdir(parents=True)
+        local_openocd.write_text("#!/bin/sh\n", encoding="utf-8")
+        local_openocd.chmod(0o755)
+        with mock.patch.object(Path, "home", return_value=self.root):
+            self.assertEqual(openocd.resolve_openocd_executable(None), str(local_openocd))
+
     def test_firmware_path_with_closing_brace_fails(self) -> None:
         bad = self.root / "bad}.hex"
         bad.write_text(":00000001FF\n", encoding="utf-8")
@@ -135,6 +167,25 @@ class OpenOCDFlashTests(unittest.TestCase):
         with self.assertRaises(openocd.OpenOCDError) as ctx:
             openocd.build_flash_plan(self.args(target="mspm0"))
         self.assertIn("MSPM0", str(ctx.exception))
+
+    def test_flash_cli_code_does_not_call_sudo_or_chmod(self) -> None:
+        for source_path in [
+            Path("src/embedforge/flash/openocd.py"),
+            Path("src/embedforge/cli.py"),
+        ]:
+            tree = ast.parse(source_path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if not isinstance(node.func, ast.Attribute) or node.func.attr != "run":
+                    continue
+                if not isinstance(node.func.value, ast.Name) or node.func.value.id != "subprocess":
+                    continue
+                if not node.args or not isinstance(node.args[0], ast.List) or not node.args[0].elts:
+                    continue
+                first = node.args[0].elts[0]
+                if isinstance(first, ast.Constant):
+                    self.assertNotIn(first.value, {"sudo", "chmod"})
 
 
 if __name__ == "__main__":

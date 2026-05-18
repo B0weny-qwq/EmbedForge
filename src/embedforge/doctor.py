@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import grp
 import os
 from pathlib import Path
 import platform
@@ -10,16 +11,25 @@ import shutil
 import sys
 
 from embedforge.probe import find_executable, run_command
+from embedforge.sdk import resolve_stm32f1_path, STM32F1_REQUIRED_PATHS
 from embedforge.util import Status, print_status, readiness
 
 
 DEFAULT_KEIL_ROOT = "/mnt/win/Keil_v5"
-DEFAULT_OPENOCD = "/opt/openocd-git/bin/openocd"
-OPENOCD_BUILD_INFO = "/opt/openocd-git/EMBEDFORGE_BUILD_INFO"
+DEFAULT_OPENOCD = "~/.local/openocd-git/bin/openocd"
+FALLBACK_OPENOCD = "/opt/openocd-git/bin/openocd"
+OPENOCD_BUILD_INFO = "~/.local/openocd-git/EMBEDFORGE_BUILD_INFO"
+DEFAULT_OPENOCD_SCRIPTS = [
+    "~/.local/openocd-git/share/openocd/scripts",
+    "/opt/openocd-git/share/openocd/scripts",
+    "/usr/local/share/openocd/scripts",
+    "/usr/share/openocd/scripts",
+]
 
 
 def run_doctor(args: argparse.Namespace) -> int:
-    del args
+    if getattr(args, "stm32", False):
+        return run_stm32_doctor()
 
     keil_root = Path(os.environ.get("EMBEDFORGE_KEIL_ROOT", DEFAULT_KEIL_ROOT))
     openocd_override = os.environ.get("EMBEDFORGE_OPENOCD")
@@ -90,6 +100,124 @@ def run_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_stm32_doctor() -> int:
+    tools = [
+        "cmake",
+        "ninja",
+        "arm-none-eabi-gcc",
+        "arm-none-eabi-objcopy",
+        "arm-none-eabi-size",
+        "git",
+    ]
+    missing: list[str] = []
+
+    print("STM32 Toolchain:")
+    for tool in tools:
+        found = shutil.which(tool)
+        print(f"  {tool}: {'OK' if found else 'MISSING'}")
+        if not found:
+            missing.append(tool)
+
+    openocd = resolve_openocd_tool()
+    scripts_dir = resolve_openocd_scripts_dir()
+    print(f"  openocd: {'OK (' + openocd + ')' if openocd else 'MISSING'}")
+    print(f"  openocd scripts: {'OK (' + scripts_dir + ')' if scripts_dir else 'MISSING'}")
+    if not openocd:
+        missing.append("openocd")
+    if not scripts_dir:
+        missing.append("openocd scripts")
+
+    gdb = shutil.which("arm-none-eabi-gdb") or shutil.which("gdb-multiarch")
+    print(f"  gdb: {'OK (' + gdb + ')' if gdb else 'MISSING'}")
+    if not gdb:
+        missing.append("arm-none-eabi-gdb or gdb-multiarch")
+
+    sdk = resolve_stm32f1_path()
+    sdk_missing = [relative for relative in STM32F1_REQUIRED_PATHS if not (sdk.path / relative).exists()]
+    print()
+    print("STM32 SDK:")
+    print(f"  STM32CubeF1: {'OK' if not sdk_missing and sdk.path.is_dir() else 'MISSING'}")
+    print(f"  path: {sdk.path}")
+
+    if missing:
+        print()
+        print("Ubuntu 24 install:")
+        print("sudo apt update")
+        print("sudo apt install -y \\")
+        print("  git build-essential \\")
+        print("  cmake ninja-build \\")
+        print("  gcc-arm-none-eabi binutils-arm-none-eabi \\")
+        print("  gdb-multiarch openocd \\")
+        print("  python3 python3-pip python3-venv")
+
+    if sdk_missing or not sdk.path.is_dir():
+        print()
+        print("STM32CubeF1 SDK not found.")
+        print("Run:")
+        print("  ./ef sdk install stm32f1")
+        print()
+        print("Or set:")
+        print("  export STM32CUBE_F1_PATH=~/SDK/STM32/STM32CubeF1")
+
+    print()
+    print("STM32 Probe Access:")
+    daplink_status = check_daplink_lsusb()
+    print(f"  DAPLink/CMSIS-DAP lsusb: {daplink_status}")
+    plugdev_status = "YES" if user_in_group("plugdev") else "NO"
+    print(f"  current user in plugdev: {plugdev_status}")
+    print("  note: permission checks only provide guidance; doctor never runs sudo or changes the system.")
+
+    return 0 if not missing and not sdk_missing and sdk.path.is_dir() else 1
+
+
+def resolve_openocd_tool() -> str | None:
+    for candidate in [
+        Path(DEFAULT_OPENOCD).expanduser(),
+        Path(FALLBACK_OPENOCD),
+    ]:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    path_openocd = shutil.which("openocd")
+    if path_openocd:
+        return path_openocd
+    return None
+
+
+def resolve_openocd_scripts_dir() -> str | None:
+    env_scripts = os.environ.get("OPENOCD_SCRIPTS")
+    candidates = [env_scripts] if env_scripts else []
+    candidates.extend(DEFAULT_OPENOCD_SCRIPTS)
+    for item in candidates:
+        path = Path(item).expanduser()
+        if path.is_dir():
+            return str(path)
+    return None
+
+
+def check_daplink_lsusb() -> str:
+    result = run_command(["lsusb"])
+    if not result.ok:
+        return f"UNKNOWN ({result.error or first_line(result.stderr) or 'lsusb failed'})"
+    if not result.stdout:
+        return "NOT FOUND"
+    matches = []
+    for line in result.stdout.splitlines():
+        lowered = line.lower()
+        if "0d28:0204" in lowered or "cmsis-dap" in lowered or "daplink" in lowered or "nxp arm mbed" in lowered:
+            matches.append(line)
+    if not matches:
+        return "NOT FOUND"
+    return "FOUND (" + "; ".join(matches) + ")"
+
+
+def user_in_group(group_name: str) -> bool:
+    try:
+        group_ids = set(os.getgroups())
+        return grp.getgrnam(group_name).gr_gid in group_ids
+    except KeyError:
+        return False
+
+
 def check_wine() -> None:
     which = run_command(["which", "wine"])
     if not which.ok:
@@ -144,7 +272,7 @@ def check_openocd(openocd_override: str | None) -> str:
                 print_status(Status.WARN, "EMBEDFORGE_OPENOCD", result.error or detail or "version check failed")
                 partial = True
 
-    opt_openocd = Path(DEFAULT_OPENOCD)
+    opt_openocd = Path(DEFAULT_OPENOCD).expanduser()
     if opt_openocd.exists() and os.access(opt_openocd, os.X_OK):
         result = run_command([str(opt_openocd), "--version"])
         detail = first_line(result.stdout) or first_line(result.stderr) or str(opt_openocd)
@@ -156,7 +284,21 @@ def check_openocd(openocd_override: str | None) -> str:
             print_status(Status.WARN, "OpenOCD git build", result.error or detail or "version check failed")
             partial = True
     else:
-        print_status(Status.MISS, "OpenOCD git build", f"not found ({DEFAULT_OPENOCD})")
+        print_status(Status.MISS, "OpenOCD git build", f"not found ({opt_openocd})")
+
+    fallback_openocd = Path(FALLBACK_OPENOCD)
+    if fallback_openocd.exists() and os.access(fallback_openocd, os.X_OK):
+        result = run_command([str(fallback_openocd), "--version"])
+        detail = first_line(result.stdout) or first_line(result.stderr) or str(fallback_openocd)
+        if result.ok:
+            print_status(Status.OK, "OpenOCD /opt fallback", detail)
+            print_openocd_build_info(fallback_openocd)
+            ready = True
+        else:
+            print_status(Status.WARN, "OpenOCD /opt fallback", result.error or detail or "version check failed")
+            partial = True
+    else:
+        print_status(Status.WARN, "OpenOCD /opt fallback", f"not found ({FALLBACK_OPENOCD})")
 
     local_wrapper = Path.home() / ".local/bin/openocd-git"
     if local_wrapper.exists() and os.access(local_wrapper, os.X_OK):
@@ -189,7 +331,7 @@ def check_openocd(openocd_override: str | None) -> str:
         print_status(
             Status.WARN,
             "OpenOCD",
-            f"{path_openocd} found, but EmbedForge requires git build at /opt/openocd-git",
+            f"{path_openocd} found; user-local ~/.local/openocd-git is preferred",
         )
         partial = True
     elif not ready:
@@ -203,7 +345,8 @@ def check_openocd(openocd_override: str | None) -> str:
 
 
 def is_embedforge_openocd(path: Path) -> bool:
-    return "/opt/openocd-git" in str(path) or openocd_build_info_for(path).exists()
+    text = str(path)
+    return "/.local/openocd-git" in text or "/opt/openocd-git" in text or openocd_build_info_for(path).exists()
 
 
 def openocd_build_info_for(path: Path) -> Path:
@@ -214,7 +357,7 @@ def openocd_build_info_for(path: Path) -> Path:
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    return Path(OPENOCD_BUILD_INFO)
+    return Path(OPENOCD_BUILD_INFO).expanduser()
 
 
 def print_openocd_build_info(path: Path) -> None:
