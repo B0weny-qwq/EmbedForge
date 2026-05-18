@@ -29,6 +29,15 @@ EmbedForge 是一个嵌入式开发自动化工具链，目标是在 Linux 环�
 ./ef run
 ```
 
+## 示例模板
+
+当前仓库内置的可复制模板：
+
+- `examples/stm32f103-cmake-blink`：STM32F103C8T6 / CMake / GCC / PC13 1 秒闪烁。
+- `examples/mspm0-openocd-blink`：TI MSPM0G3507 / CMake / GCC / DriverLib LED 闪烁。
+
+模板只包含源码、CMake、链接脚本和 EmbedForge 配置；SDK、OpenOCD、Keil、Wine 和构建产物不进 Git。
+
 ## 快速开始
 
 ```bash
@@ -37,6 +46,24 @@ chmod +x ef
 ```
 
 `doctor` 会检查 Wine、Keil、OpenOCD、USB 和串口环境。
+
+查看可安装 SDK：
+
+```bash
+./ef sdk list
+```
+
+安装 STM32CubeF1：
+
+```bash
+./ef sdk install stm32f1
+```
+
+安装 TI MSPM0 SDK：
+
+```bash
+./ef sdk install mspm0
+```
 
 ## OpenOCD Git 版安装
 
@@ -171,6 +198,7 @@ MSPM0 不假定一定支持。如果当前 OpenOCD 没有 `target/ti_mspm0.cfg` 
 ## 更多文档
 
 - [部署文档](docs/deployment.zh-CN.md)
+- [MSPM0 快速开始](docs/mspm0_quickstart.md)
 - [OpenOCD 烧录说明](docs/openocd_flash.md)
 - [OpenOCD Git 构建说明](docs/openocd.md)
 - [Wine Keil 说明](docs/wine-keil.md)

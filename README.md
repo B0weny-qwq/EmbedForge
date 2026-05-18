@@ -29,11 +29,29 @@ Initial command shape:
 ./ef run
 ```
 
+## Example Templates
+
+Built-in copyable templates:
+
+- `examples/stm32f103-cmake-blink`: STM32F103C8T6 / CMake / GCC / PC13 1-second blink.
+- `examples/mspm0-openocd-blink`: TI MSPM0G3507 / CMake / GCC / DriverLib LED blink.
+
+Templates contain source, CMake, linker scripts, and EmbedForge config only. SDKs,
+OpenOCD installs, Keil, Wine, and build artifacts stay outside Git.
+
 ## Quick Start
 
 ```bash
 chmod +x ef
 ./ef doctor
+```
+
+List and install vendor SDKs:
+
+```bash
+./ef sdk list
+./ef sdk install stm32f1
+./ef sdk install mspm0
 ```
 
 ## OpenOCD Flash Quick Start

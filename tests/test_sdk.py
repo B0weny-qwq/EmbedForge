@@ -28,6 +28,21 @@ class SdkTests(unittest.TestCase):
         self.assertEqual(path.path, Path("/tmp/cube"))
         self.assertEqual(path.source, "STM32CUBE_F1_PATH")
 
+    def test_mspm0_cli_path_accepts_sdk_root(self) -> None:
+        path = sdk.resolve_mspm0_path("/tmp/sdk-root")
+        self.assertEqual(path.path, Path("/tmp/sdk-root") / "mspm0-sdk")
+        self.assertEqual(path.source, "--path")
+
+    def test_mspm0_env_path_beats_default_root(self) -> None:
+        with mock.patch.dict(
+            "os.environ",
+            {"MSPM0_SDK_PATH": "/tmp/mspm0", "EMBEDFORGE_SDK_ROOT": "/tmp/root"},
+            clear=False,
+        ):
+            path = sdk.resolve_mspm0_path()
+        self.assertEqual(path.path, Path("/tmp/mspm0"))
+        self.assertEqual(path.source, "MSPM0_SDK_PATH")
+
     def test_check_stm32f1_requires_expected_sdk_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "STM32CubeF1"
@@ -35,10 +50,28 @@ class SdkTests(unittest.TestCase):
                 (root / relative).mkdir(parents=True, exist_ok=True)
             self.assertEqual(sdk.check_stm32f1(sdk.SdkPath(root, "test")), 0)
 
+    def test_check_mspm0_requires_expected_sdk_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "mspm0-sdk"
+            for relative in sdk.MSPM0_REQUIRED_PATHS:
+                path = root / relative
+                if path.suffix:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("# file\n", encoding="utf-8")
+                else:
+                    path.mkdir(parents=True, exist_ok=True)
+            self.assertEqual(sdk.check_mspm0(sdk.SdkPath(root, "test")), 0)
+
     def test_install_dry_run_does_not_create_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "SDK" / "STM32CubeF1"
             self.assertEqual(sdk.install_stm32f1(sdk.SdkPath(root, "test"), dry_run=True), 0)
+            self.assertFalse(root.exists())
+
+    def test_install_mspm0_dry_run_does_not_create_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "SDK" / "mspm0-sdk"
+            self.assertEqual(sdk.install_mspm0(sdk.SdkPath(root, "test"), dry_run=True), 0)
             self.assertFalse(root.exists())
 
 

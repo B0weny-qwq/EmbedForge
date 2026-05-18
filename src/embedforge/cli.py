@@ -96,7 +96,19 @@ def apply_example_flash_defaults(args: argparse.Namespace) -> None:
     args.file = args.file or str(project_dir / artifact)
     args.adapter = args.adapter or get_nested(config, "flash.adapter", "cmsis-dap")
     args.target = args.target or get_nested(config, "flash.target", "stm32f103")
+    args.scripts_dir = args.scripts_dir or resolve_project_path(project_dir, get_nested(config, "flash.scripts_dir", None))
+    args.interface_cfg = args.interface_cfg or get_nested(config, "flash.interface_cfg", None)
+    args.target_cfg = args.target_cfg or get_nested(config, "flash.target_cfg", None)
     args.config = args.config or str(REPO_ROOT / "configs" / "openocd_targets.json")
+
+
+def resolve_project_path(project_dir: Path, value: object | None) -> str | None:
+    if value is None:
+        return None
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str((project_dir / path).resolve())
 
 
 def handle_reset(args: argparse.Namespace) -> int:

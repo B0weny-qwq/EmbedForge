@@ -13,5 +13,7 @@ logs/*
 build/*
 !build/.gitkeep
 **/build/
+!src/embedforge/build/
+!src/embedforge/build/*.py
 output/*
 !output/.gitkeep

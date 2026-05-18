@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from embedforge.core.config import ConfigError, get_nested, load_project_config
-from embedforge.sdk import resolve_stm32f1_path
+from embedforge.sdk import resolve_mspm0_path, resolve_stm32f1_path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -58,6 +58,7 @@ def build_cmake_project(project_dir: Path, config: dict[str, object], dry_run: b
     build_dir = project_dir / str(get_nested(config, "build.build_dir", "build"))
     generator = str(get_nested(config, "build.generator", "ninja"))
     toolchain_file = project_dir / "cmake" / "arm-none-eabi.cmake"
+    sdk_env = str(get_nested(config, "sdk.env", "STM32CUBE_F1_PATH"))
     sdk_path = resolve_sdk_path(config)
 
     configure = [
@@ -69,7 +70,7 @@ def build_cmake_project(project_dir: Path, config: dict[str, object], dry_run: b
         "-G",
         "Ninja" if generator == "ninja" else generator,
         f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file.relative_to(project_dir)}",
-        f"-DSTM32CUBE_F1_PATH={sdk_path}",
+        f"-D{sdk_env}={sdk_path}",
     ]
     build = ["cmake", "--build", str(build_dir.relative_to(project_dir))]
 
@@ -81,7 +82,7 @@ def build_cmake_project(project_dir: Path, config: dict[str, object], dry_run: b
         return 0
 
     env = os.environ.copy()
-    env["STM32CUBE_F1_PATH"] = str(sdk_path)
+    env[sdk_env] = str(sdk_path)
     for command in (configure, build):
         completed = subprocess.run(command, cwd=project_dir, env=env, check=False)
         if completed.returncode != 0:
@@ -93,6 +94,10 @@ def resolve_sdk_path(config: dict[str, object]) -> Path:
     env_name = str(get_nested(config, "sdk.env", "STM32CUBE_F1_PATH"))
     if os.environ.get(env_name):
         return Path(os.environ[env_name]).expanduser()
+    sdk_type = str(get_nested(config, "sdk.type", "stm32cube"))
+    sdk_family = str(get_nested(config, "sdk.family", "f1"))
+    if sdk_type in {"ti-mspm0", "mspm0"} or sdk_family == "mspm0":
+        return resolve_mspm0_path(None).path
     return resolve_stm32f1_path(None).path
 
 

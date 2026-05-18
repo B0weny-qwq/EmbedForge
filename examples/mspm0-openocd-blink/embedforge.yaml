@@ -1,0 +1,32 @@
+project:
+  name: mspm0-openocd-blink
+  type: ti-mspm0
+
+chip:
+  vendor: ti
+  family: mspm0
+  part: MSPM0G3507
+  define: __MSPM0G3507__
+
+sdk:
+  type: ti-mspm0
+  family: mspm0
+  env: MSPM0_SDK_PATH
+  default_path: ~/SDK/TI/mspm0-sdk
+
+build:
+  system: cmake
+  generator: ninja
+  toolchain: arm-none-eabi-gcc
+  build_dir: build
+  artifact: build/app.elf
+  hex: build/app.hex
+  bin: build/app.bin
+
+flash:
+  backend: openocd
+  adapter: cmsis-dap
+  target: mspm0g3507
+  scripts_dir: ../../configs/openocd
+  target_cfg: target/mspm0.cfg
+  artifact: build/app.elf
