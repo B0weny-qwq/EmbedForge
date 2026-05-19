@@ -43,8 +43,13 @@ OpenOCD installs, Keil, Wine, and build artifacts stay outside Git.
 
 ```bash
 chmod +x ef
-./ef doctor
+./ef doctor --example stm32f103-cmake-blink
+./ef doctor --example mspm0-openocd-blink
 ```
+
+`doctor --example` checks only the dependencies required by that project. The
+default path is CMake/GCC/OpenOCD/SDK first; Wine and Keil are optional legacy
+checks via `./ef doctor --legacy-keil`.
 
 List and install vendor SDKs:
 
@@ -52,6 +57,15 @@ List and install vendor SDKs:
 ./ef sdk list
 ./ef sdk install stm32f1
 ./ef sdk install mspm0
+```
+
+CI-safe checks:
+
+```bash
+python3 -m compileall src tools tests
+PYTHONPATH=src python3 -m unittest discover -s tests
+./ef flash --example stm32f103-cmake-blink --dry-run --verbose
+./ef flash --example mspm0-openocd-blink --dry-run --verbose
 ```
 
 ## OpenOCD Flash Quick Start

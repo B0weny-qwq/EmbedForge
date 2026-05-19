@@ -49,10 +49,11 @@ This installs the `ef` console script from `pyproject.toml`. The repository-loca
 git clone https://github.com/B0weny-qwq/EmbedForge.git
 cd EmbedForge
 chmod +x ef scripts/*.sh tools/*.py
-./ef doctor
+./ef doctor --example stm32f103-cmake-blink
+./ef doctor --example mspm0-openocd-blink
 ```
 
-On a fresh machine, it is normal for `doctor` to report missing Keil, OpenOCD, and serial devices until those parts are installed or connected.
+`doctor --example` checks the CMake, GCC, SDK, OpenOCD cfg, USB, and serial items required by that example and prints copyable fixes. Hardware items are warnings so build setup can still be validated without a connected board.
 
 ## Keil And Wine
 
@@ -77,7 +78,7 @@ wine --version
 Verify EmbedForge can see Keil tools:
 
 ```bash
-./ef doctor
+./ef doctor --legacy-keil
 ```
 
 Keil installers, license files, and Windows-side setup are not distributed by this repository. Keep those machine-specific details outside the repo and point EmbedForge to the installed Keil root.
@@ -238,13 +239,8 @@ CI should not assume hardware is attached. Recommended checks:
 ```bash
 python3 -m compileall src tools tests/test_openocd_flash.py
 PYTHONPATH=src python3 -m unittest discover -s tests
-./ef flash \
-  --adapter cmsis-dap \
-  --target stm32f103 \
-  --file configs/openocd/target/stm32f1x.cfg \
-  --scripts-dir configs/openocd \
-  --dry-run \
-  --verbose
+./ef flash --example stm32f103-cmake-blink --dry-run --verbose
+./ef flash --example mspm0-openocd-blink --dry-run --verbose
 ```
 
 Use real flashing only in a hardware-in-the-loop runner with known USB topology and udev setup.

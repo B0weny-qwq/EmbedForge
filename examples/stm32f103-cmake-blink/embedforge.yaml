@@ -27,6 +27,7 @@ flash:
   backend: openocd
   adapter: cmsis-dap
   target: stm32f103
+  scripts_dir: ../../configs/openocd
   target_cfg: target/stm32f1x.cfg
   interface_cfg:
     cmsis-dap: interface/cmsis-dap.cfg

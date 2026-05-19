@@ -53,10 +53,11 @@ python3 -m pip install --user -e .
 git clone https://github.com/B0weny-qwq/EmbedForge.git
 cd EmbedForge
 chmod +x ef scripts/*.sh tools/*.py
-./ef doctor
+./ef doctor --example stm32f103-cmake-blink
+./ef doctor --example mspm0-openocd-blink
 ```
 
-新机器上，`doctor` 报 Keil、OpenOCD、串口缺失是正常的，直到这些工具或硬件准备好。
+`doctor --example` 会按示例工程配置检查实际需要的 CMake、GCC、SDK、OpenOCD cfg、USB 和串口项，并输出可复制的修复命令。硬件相关项通常是 WARN，不阻塞无硬件机器上的构建准备。
 
 ## Keil 与 Wine
 
@@ -81,7 +82,7 @@ wine --version
 验证 EmbedForge 是否能看到 Keil 工具：
 
 ```bash
-./ef doctor
+./ef doctor --legacy-keil
 ```
 
 Keil 安装包、授权文件和 Windows 侧安装状态不由本仓库分发。建议把这些机器相关内容放在仓库外，只通过环境变量告诉 EmbedForge Keil 根目录。
@@ -284,13 +285,8 @@ CI 不应默认假设接了硬件。推荐检查：
 ```bash
 python3 -m compileall src tools tests/test_openocd_flash.py
 PYTHONPATH=src python3 -m unittest discover -s tests
-./ef flash \
-  --adapter cmsis-dap \
-  --target stm32f103 \
-  --file configs/openocd/target/stm32f1x.cfg \
-  --scripts-dir configs/openocd \
-  --dry-run \
-  --verbose
+./ef flash --example stm32f103-cmake-blink --dry-run --verbose
+./ef flash --example mspm0-openocd-blink --dry-run --verbose
 ```
 
 真实烧录应放在硬件在环 runner 中执行，并固定 USB 拓扑和 udev 环境。

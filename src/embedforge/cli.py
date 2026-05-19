@@ -26,7 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     doctor = subparsers.add_parser("doctor", help="check local toolchain environment")
+    doctor.add_argument("--example", default=None, help="check the dependencies required by an example project")
     doctor.add_argument("--stm32", action="store_true", help="check STM32 CLI toolchain and SDK")
+    doctor.add_argument("--legacy-keil", action="store_true", help="check optional Wine/Keil legacy toolchains")
+    doctor.add_argument("--all", action="store_true", help="run the legacy all-toolchain environment check")
     doctor.set_defaults(handler=doctor_module_handler)
 
     sdk_parser = subparsers.add_parser("sdk", help="manage vendor SDKs")
@@ -97,7 +100,7 @@ def apply_example_flash_defaults(args: argparse.Namespace) -> None:
     args.adapter = args.adapter or get_nested(config, "flash.adapter", "cmsis-dap")
     args.target = args.target or get_nested(config, "flash.target", "stm32f103")
     args.scripts_dir = args.scripts_dir or resolve_project_path(project_dir, get_nested(config, "flash.scripts_dir", None))
-    args.interface_cfg = args.interface_cfg or get_nested(config, "flash.interface_cfg", None)
+    args.interface_cfg = args.interface_cfg or resolve_interface_cfg(config, str(args.adapter))
     args.target_cfg = args.target_cfg or get_nested(config, "flash.target_cfg", None)
     args.config = args.config or str(REPO_ROOT / "configs" / "openocd_targets.json")
 
@@ -109,6 +112,13 @@ def resolve_project_path(project_dir: Path, value: object | None) -> str | None:
     if path.is_absolute():
         return str(path)
     return str((project_dir / path).resolve())
+
+
+def resolve_interface_cfg(config: dict[str, object], adapter: str) -> object | None:
+    value = get_nested(config, "flash.interface_cfg", None)
+    if isinstance(value, dict):
+        return value.get(adapter)
+    return value
 
 
 def handle_reset(args: argparse.Namespace) -> int:
@@ -124,9 +134,9 @@ def handle_reset(args: argparse.Namespace) -> int:
         file=str(project_dir / get_nested(config, "flash.artifact", "build/app.elf")),
         address=None,
         openocd=None,
-        scripts_dir=None,
+        scripts_dir=resolve_project_path(project_dir, get_nested(config, "flash.scripts_dir", None)),
         interface_cfg=None,
-        target_cfg=None,
+        target_cfg=get_nested(config, "flash.target_cfg", None),
         config=str(REPO_ROOT / "configs" / "openocd_targets.json"),
         transport=None,
         speed=None,
@@ -139,6 +149,7 @@ def handle_reset(args: argparse.Namespace) -> int:
         exit=True,
         reset_only=True,
     )
+    flash_args.interface_cfg = resolve_interface_cfg(config, str(flash_args.adapter))
     return openocd_flash.run_reset(flash_args)
 
 
@@ -165,13 +176,8 @@ def handle_run(args: argparse.Namespace) -> int:
         return 2
 
     if not args.no_monitor:
-        print("SDK CHECK:")
-        sdk_status = sdk.check_stm32f1(sdk.resolve_stm32f1_path())
-        if sdk_status != 0:
-            print("RESULT: FAIL")
-            return sdk_status
-
-        doctor_status = doctor.run_stm32_doctor()
+        print("ENV CHECK:")
+        doctor_status = doctor.run_example_doctor(args.example)
         if doctor_status != 0:
             print("RESULT: FAIL")
             return doctor_status

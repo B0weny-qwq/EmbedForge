@@ -1,0 +1,4 @@
+interface:
+  display_name: "EmbedForge Project Standards"
+  short_description: "Competition-first EmbedForge project architecture standards"
+  default_prompt: "Use this skill to design or review an EmbedForge embedded project structure, layering, CMake boundaries, and competition-oriented engineering rules."

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import grp
 import os
 from pathlib import Path
@@ -10,8 +11,16 @@ import platform
 import shutil
 import sys
 
+from embedforge.core.config import ConfigError, get_nested, load_project_config
+from embedforge.flash import openocd as openocd_flash
 from embedforge.probe import find_executable, run_command
-from embedforge.sdk import resolve_stm32f1_path, STM32F1_REQUIRED_PATHS
+from embedforge.sdk import (
+    MSPM0_REQUIRED_PATHS,
+    STM32F1_REQUIRED_PATHS,
+    SdkPath,
+    resolve_mspm0_path,
+    resolve_stm32f1_path,
+)
 from embedforge.util import Status, print_status, readiness
 
 
@@ -25,11 +34,40 @@ DEFAULT_OPENOCD_SCRIPTS = [
     "/usr/local/share/openocd/scripts",
     "/usr/share/openocd/scripts",
 ]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    status: Status
+    name: str
+    detail: str
+    required: bool = True
+    fix: str | None = None
 
 
 def run_doctor(args: argparse.Namespace) -> int:
+    if getattr(args, "example", None):
+        return run_example_doctor(args.example)
     if getattr(args, "stm32", False):
         return run_stm32_doctor()
+    if getattr(args, "legacy_keil", False):
+        return run_legacy_keil_doctor()
+    if not getattr(args, "all", False):
+        print("EmbedForge Doctor")
+        print("=================")
+        print("No project selected. For CMake-first workflows, run:")
+        print("  ./ef doctor --example stm32f103-cmake-blink")
+        print("  ./ef doctor --example mspm0-openocd-blink")
+        print()
+        print("Optional legacy Keil/Wine check:")
+        print("  ./ef doctor --legacy-keil")
+        return 0
+
+    return run_legacy_keil_doctor()
+
+
+def run_legacy_keil_doctor() -> int:
 
     keil_root = Path(os.environ.get("EMBEDFORGE_KEIL_ROOT", DEFAULT_KEIL_ROOT))
     openocd_override = os.environ.get("EMBEDFORGE_OPENOCD")
@@ -98,6 +136,284 @@ def run_doctor(args: argparse.Namespace) -> int:
     print_status(openocd_summary_status(openocd_state), "OpenOCD", openocd_state)
     print_status(Status.OK if serial_ready else Status.MISS, "Serial", "ready" if serial_ready else "missing")
     return 0
+
+
+def run_example_doctor(example: str) -> int:
+    project_dir = REPO_ROOT / "examples" / example
+    try:
+        config = load_project_config(project_dir)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"EmbedForge Doctor: {example}")
+    print("=" * (19 + len(example)))
+    print_status(Status.OK, "platform", platform.platform())
+    print_status(Status.OK, "python", sys.version.split()[0])
+    print()
+
+    results = check_example_project(project_dir, config)
+    print_results("Required", [item for item in results if item.required])
+    print_results("Optional / Hardware", [item for item in results if not item.required])
+
+    failures = [item for item in results if item.required and item.status == Status.MISS]
+    warnings = [item for item in results if item.required and item.status == Status.WARN]
+    print()
+    print("Summary")
+    print("-------")
+    if failures:
+        print_status(Status.MISS, "example", f"blocked by {len(failures)} missing required item(s)")
+        print_fixes(failures)
+        return 1
+    if warnings:
+        print_status(Status.WARN, "example", f"ready with {len(warnings)} warning(s)")
+        print_fixes(warnings)
+        return 0
+    print_status(Status.OK, "example", "ready")
+    return 0
+
+
+def check_example_project(project_dir: Path, config: dict[str, object]) -> list[CheckResult]:
+    build_system = str(get_nested(config, "build.system", ""))
+    if build_system != "cmake":
+        return [
+            CheckResult(
+                Status.WARN,
+                "build system",
+                f"{build_system or 'missing'} is not covered by CMake-first doctor",
+                required=False,
+            )
+        ]
+
+    results: list[CheckResult] = []
+    results.extend(check_required_tools())
+    results.extend(check_project_sdk(config))
+    results.extend(check_project_openocd(project_dir, config))
+    results.extend(check_project_hardware(config))
+    results.extend(check_project_serial(config))
+    return results
+
+
+def check_required_tools() -> list[CheckResult]:
+    tools = [
+        ("git", "sudo apt install -y git"),
+        ("cmake", "sudo apt install -y cmake"),
+        ("ninja", "sudo apt install -y ninja-build"),
+        ("arm-none-eabi-gcc", "sudo apt install -y gcc-arm-none-eabi"),
+        ("arm-none-eabi-objcopy", "sudo apt install -y binutils-arm-none-eabi"),
+        ("arm-none-eabi-size", "sudo apt install -y binutils-arm-none-eabi"),
+    ]
+    results = []
+    for tool, fix in tools:
+        found = shutil.which(tool)
+        results.append(
+            CheckResult(
+                Status.OK if found else Status.MISS,
+                tool,
+                found or "not found",
+                fix=fix,
+            )
+        )
+    return results
+
+
+def check_project_sdk(config: dict[str, object]) -> list[CheckResult]:
+    family = str(get_nested(config, "sdk.family", ""))
+    sdk_type = str(get_nested(config, "sdk.type", ""))
+    if family == "stm32f1" or sdk_type == "stm32cube":
+        return check_sdk_layout("STM32CubeF1", resolve_stm32f1_path(), STM32F1_REQUIRED_PATHS, "  ./ef sdk install stm32f1")
+    if family == "mspm0" or sdk_type in {"mspm0", "ti-mspm0"}:
+        return check_sdk_layout("MSPM0 SDK", resolve_mspm0_path(), MSPM0_REQUIRED_PATHS, "  ./ef sdk install mspm0")
+    return [
+        CheckResult(
+            Status.WARN,
+            "SDK",
+            f"unknown sdk family/type: family={family or 'unset'}, type={sdk_type or 'unset'}",
+            fix="Configure sdk.family in embedforge.yaml or install SDK manually.",
+        )
+    ]
+
+
+def check_sdk_layout(label: str, sdk: SdkPath, required_paths: list[str], install_command: str) -> list[CheckResult]:
+    if not sdk.path.is_dir():
+        return [
+            CheckResult(
+                Status.MISS,
+                label,
+                f"not found ({sdk.path})",
+                fix=f"Run:\n{install_command}\nOr set the SDK environment variable to the installed SDK path.",
+            )
+        ]
+
+    missing = [relative for relative in required_paths if not (sdk.path / relative).exists()]
+    if missing:
+        return [
+            CheckResult(
+                Status.MISS,
+                label,
+                f"incomplete ({sdk.path}); missing: {', '.join(missing)}",
+                fix=f"Reinstall or fix the SDK layout. Suggested command:\n{install_command}",
+            )
+        ]
+    return [CheckResult(Status.OK, label, str(sdk.path))]
+
+
+def check_project_openocd(project_dir: Path, config: dict[str, object]) -> list[CheckResult]:
+    if str(get_nested(config, "flash.backend", "openocd")) != "openocd":
+        return [CheckResult(Status.WARN, "OpenOCD", "flash backend is not openocd", required=False)]
+
+    results: list[CheckResult] = []
+    openocd_exe = openocd_flash.resolve_openocd_executable(None)
+    openocd_path = Path(openocd_exe).expanduser()
+    openocd_found = openocd_path.is_file() if len(openocd_path.parts) > 1 else shutil.which(openocd_exe) is not None
+    results.append(
+        CheckResult(
+            Status.OK if openocd_found else Status.MISS,
+            "OpenOCD executable",
+            str(openocd_path) if openocd_found else "not found",
+            fix="Run:\n  ./scripts/setup_openocd_git.sh\nOr pass --openocd to flash commands.",
+        )
+    )
+
+    scripts_value = get_nested(config, "flash.scripts_dir", None)
+    scripts_dir = resolve_project_path(project_dir, scripts_value) if scripts_value is not None else resolve_openocd_scripts_dir()
+    scripts_ok = bool(scripts_dir and Path(scripts_dir).is_dir())
+    results.append(
+        CheckResult(
+            Status.OK if scripts_ok else Status.MISS,
+            "OpenOCD scripts",
+            str(scripts_dir) if scripts_ok else "not found",
+            fix="Run ./scripts/setup_openocd_git.sh, set OPENOCD_SCRIPTS, or configure flash.scripts_dir.",
+        )
+    )
+
+    if scripts_ok:
+        results.extend(check_openocd_cfgs(Path(str(scripts_dir)), config))
+    return results
+
+
+def check_openocd_cfgs(scripts_dir: Path, config: dict[str, object]) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    interface_cfg = get_nested(config, "flash.interface_cfg", None)
+    if isinstance(interface_cfg, dict):
+        adapter = str(get_nested(config, "flash.adapter", "cmsis-dap"))
+        interface_cfg = interface_cfg.get(adapter)
+    if not interface_cfg:
+        adapter = str(get_nested(config, "flash.adapter", "cmsis-dap"))
+        interface_cfg = openocd_flash.DEFAULT_CONFIG["adapters"].get(adapter, {}).get("interface")
+    if interface_cfg:
+        results.append(check_cfg_file(scripts_dir, str(interface_cfg), "OpenOCD interface cfg"))
+
+    target_cfg = get_nested(config, "flash.target_cfg", None)
+    if target_cfg:
+        results.append(check_cfg_file(scripts_dir, str(target_cfg), "OpenOCD target cfg"))
+    else:
+        target = str(get_nested(config, "flash.target", ""))
+        target_value = openocd_flash.DEFAULT_CONFIG["targets"].get(target)
+        candidates = target_value if isinstance(target_value, list) else [target_value] if target_value else []
+        if candidates:
+            found = next((candidate for candidate in candidates if candidate and (scripts_dir / str(candidate)).is_file()), None)
+            results.append(
+                CheckResult(
+                    Status.OK if found else Status.MISS,
+                    "OpenOCD target cfg",
+                    str(found) if found else "not found for " + target,
+                    fix=target_cfg_fix(target),
+                )
+            )
+    return results
+
+
+def check_cfg_file(scripts_dir: Path, cfg: str, label: str) -> CheckResult:
+    path = Path(cfg).expanduser()
+    exists = path.is_file() if path.is_absolute() else (scripts_dir / path).is_file()
+    return CheckResult(
+        Status.OK if exists else Status.MISS,
+        label,
+        str(path if path.is_absolute() else scripts_dir / path) if exists else f"not found ({cfg})",
+        fix=target_cfg_fix(cfg),
+    )
+
+
+def target_cfg_fix(target_or_cfg: str) -> str:
+    if "mspm0" in target_or_cfg:
+        return (
+            "Current OpenOCD scripts may not include MSPM0 support. Use TI SDK / UniFlash / "
+            "a vendor OpenOCD fork, or pass --target-cfg manually."
+        )
+    return "Check OPENOCD_SCRIPTS, run ./scripts/setup_openocd_git.sh, or pass --target-cfg/--interface-cfg."
+
+
+def check_project_hardware(config: dict[str, object]) -> list[CheckResult]:
+    adapter = str(get_nested(config, "flash.adapter", ""))
+    if adapter not in {"cmsis-dap", "daplink"}:
+        return []
+    daplink_status = check_daplink_lsusb()
+    status = Status.OK if daplink_status.startswith("FOUND") else Status.WARN
+    plugdev_status = "YES" if user_in_group("plugdev") else "NO"
+    return [
+        CheckResult(
+            status,
+            "DAPLink/CMSIS-DAP lsusb",
+            daplink_status,
+            required=False,
+            fix="Plug in the probe, install OpenOCD udev rules, add user to plugdev, then replug the probe.",
+        ),
+        CheckResult(
+            Status.OK if plugdev_status == "YES" else Status.WARN,
+            "plugdev group",
+            plugdev_status,
+            required=False,
+            fix="sudo groupadd -f plugdev && sudo usermod -aG plugdev \"$USER\"; log out/in afterwards.",
+        ),
+    ]
+
+
+def check_project_serial(config: dict[str, object]) -> list[CheckResult]:
+    port = get_nested(config, "serial.port", None)
+    if not port:
+        return []
+    path = Path(str(port))
+    return [
+        CheckResult(
+            Status.OK if path.exists() else Status.WARN,
+            "serial port",
+            str(path) if path.exists() else f"not found ({path})",
+            required=False,
+            fix="Connect the board, update serial.port in embedforge.yaml, or run with --no-monitor.",
+        )
+    ]
+
+
+def resolve_project_path(project_dir: Path, value: object) -> str:
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str((project_dir / path).resolve())
+
+
+def print_results(title: str, results: list[CheckResult]) -> None:
+    if not results:
+        return
+    print(title)
+    print("-" * len(title))
+    for result in results:
+        print_status(result.status, result.name, result.detail)
+    print()
+
+
+def print_fixes(results: list[CheckResult]) -> None:
+    fixes = []
+    for result in results:
+        if result.fix and result.fix not in fixes:
+            fixes.append(result.fix)
+    if not fixes:
+        return
+    print()
+    print("Suggested fixes")
+    print("---------------")
+    for fix in fixes:
+        print(fix)
 
 
 def run_stm32_doctor() -> int:

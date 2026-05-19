@@ -42,10 +42,12 @@ EmbedForge 是一个嵌入式开发自动化工具链，目标是在 Linux 环�
 
 ```bash
 chmod +x ef
-./ef doctor
+./ef doctor --example stm32f103-cmake-blink
+./ef doctor --example mspm0-openocd-blink
 ```
 
-`doctor` 会检查 Wine、Keil、OpenOCD、USB 和串口环境。
+`doctor --example` 只检查该工程实际需要的依赖。默认主线是 CMake/GCC/OpenOCD/SDK；
+Wine 和 Keil 作为可选 legacy 能力，通过 `./ef doctor --legacy-keil` 单独检查。
 
 查看可安装 SDK：
 
@@ -63,6 +65,15 @@ chmod +x ef
 
 ```bash
 ./ef sdk install mspm0
+```
+
+适合 CI 或无硬件机器的检查：
+
+```bash
+python3 -m compileall src tools tests
+PYTHONPATH=src python3 -m unittest discover -s tests
+./ef flash --example stm32f103-cmake-blink --dry-run --verbose
+./ef flash --example mspm0-openocd-blink --dry-run --verbose
 ```
 
 ## OpenOCD Git 版安装

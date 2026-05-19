@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Static Python check
+        run: python3 -m compileall src tools tests
+
+      - name: Unit tests
+        run: PYTHONPATH=src python3 -m unittest discover -s tests
+
+      - name: OpenOCD dry-run smoke tests
+        run: |
+          ./ef flash --example stm32f103-cmake-blink --dry-run --verbose
+          ./ef flash --example mspm0-openocd-blink --dry-run --verbose
